@@ -1,0 +1,28 @@
+# Environment
+.env
+
+# Credentials — NEVER commit the JSON key file (only ignore the key itself)
+credentials/*.json
+
+# Trained model files
+models/*.pkl
+
+# Airflow logs
+airflow/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node / frontend build
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+.claude
