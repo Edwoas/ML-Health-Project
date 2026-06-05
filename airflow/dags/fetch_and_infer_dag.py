@@ -67,16 +67,18 @@ DB_COLUMNS = {
 
 def fetch_and_upsert(**context):
     import gspread
+    import google.auth
     import pandas as pd
     import sqlalchemy
     from sqlalchemy import text
-    from google.oauth2.service_account import Credentials
 
     scopes = [
         'https://www.googleapis.com/auth/spreadsheets.readonly',
         'https://www.googleapis.com/auth/drive.readonly',
     ]
-    creds = Credentials.from_service_account_file(SA_PATH, scopes=scopes)
+    # Use Application Default Credentials — on the GCP VM this automatically
+    # picks up the service account attached to the instance, no key file needed.
+    creds, _ = google.auth.default(scopes=scopes)
     gc = gspread.authorize(creds)
 
     worksheet = gc.open_by_key(SHEET_ID).sheet1
