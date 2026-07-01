@@ -115,18 +115,20 @@ def get_inference_features(target_date, db_url: str) -> 'pd.DataFrame | None':
     import sqlalchemy
 
     engine = sqlalchemy.create_engine(db_url)
-    df = pd.read_sql(
-        "SELECT log_date, weather, temperature, num_meals, num_junkfood, "
-        "meal_size_lunch, meal_size_dinner, sugar, "
-        "stomach_issues, sleep_quality, exercise_gym, exercise_morning, "
-        "stress, social_activity, social_conflicts "
-        "FROM health_logs "
-        "WHERE log_date <= %(target)s "
-        "ORDER BY log_date DESC "
-        f"LIMIT {LAG_WINDOW}",
-        engine,
-        params={'target': str(target_date)},
-    )
+    with engine.connect() as conn:
+        df = pd.read_sql(
+            sqlalchemy.text(
+                "SELECT log_date, weather, temperature, num_meals, num_junkfood, "
+                "meal_size_lunch, meal_size_dinner, sugar, "
+                "stomach_issues, sleep_quality, exercise_gym, exercise_morning, "
+                "stress, social_activity, social_conflicts "
+                "FROM health_logs "
+                "WHERE log_date <= :target "
+                f"ORDER BY log_date DESC LIMIT {LAG_WINDOW}"
+            ),
+            conn,
+            params={'target': str(target_date)},
+        )
 
     if df.empty or str(df['log_date'].max()) != str(target_date):
         return None  # target date itself not in DB

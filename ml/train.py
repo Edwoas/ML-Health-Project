@@ -49,15 +49,16 @@ def train_models(db_url: str, model_dir: str = '/models') -> dict:
     from ml.features import build_features
 
     engine = sqlalchemy.create_engine(db_url)
-    df = pd.read_sql("""
-        SELECT log_date, weather, temperature, num_meals, num_junkfood,
-               meal_size_lunch, meal_size_dinner, sugar,
-               stomach_issues, sleep_quality, exercise_gym, exercise_morning,
-               stress, social_activity, social_conflicts, tiredness_score
-        FROM health_logs
-        WHERE tiredness_score IS NOT NULL
-        ORDER BY log_date
-    """, engine)
+    with engine.connect() as conn:
+        df = pd.read_sql(sqlalchemy.text("""
+            SELECT log_date, weather, temperature, num_meals, num_junkfood,
+                   meal_size_lunch, meal_size_dinner, sugar,
+                   stomach_issues, sleep_quality, exercise_gym, exercise_morning,
+                   stress, social_activity, social_conflicts, tiredness_score
+            FROM health_logs
+            WHERE tiredness_score IS NOT NULL
+            ORDER BY log_date
+        """), conn)
 
     if len(df) < MIN_SAMPLES:
         print(f"Only {len(df)} labelled rows (need >= {MIN_SAMPLES}). Skipping training.")
