@@ -158,7 +158,7 @@ def check_new_data(**context) -> bool:
 
     if current_count > last_count:
         print(f"New scored rows detected: {last_count} → {current_count}. Proceeding.")
-        # Save updated count so next run can compare
+        Variable.delete(_SCORED_COUNT_VAR)
         Variable.set(_SCORED_COUNT_VAR, current_count)
         return True
 
