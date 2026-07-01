@@ -51,8 +51,10 @@ COLUMN_ALIASES = {
     'sugar_intake':                 'sugar',
     'gym':                          'exercise_gym',
     'exercise_(gym)':               'exercise_gym',
+    'excercise_gym':                'exercise_gym',
     'morning_exercise':             'exercise_morning',
     'exercise_(morning)':           'exercise_morning',
+    'excercise_morning':            'exercise_morning',
 }
 
 DB_COLUMNS = {
@@ -81,7 +83,7 @@ def fetch_and_upsert(**context):
     creds, _ = google.auth.default(scopes=scopes)
     gc = gspread.authorize(creds)
 
-    worksheet = gc.open_by_key(SHEET_ID).sheet1
+    worksheet = gc.open_by_key(SHEET_ID).worksheet('Blad1')
     records = worksheet.get_all_records(default_blank=None)
 
     if not records:
