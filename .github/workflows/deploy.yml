@@ -23,12 +23,12 @@ jobs:
           --health-timeout 5s
           --health-retries 10
         ports:
-          - 5432/tcp
+          - 5432:5432
 
     env:
-      TEST_DB_URL: postgresql://health:testpass@localhost:${{ job.services.postgres.ports[5432] }}/health
+      TEST_DB_URL: postgresql://health:testpass@localhost:5432/health
       PGHOST: localhost
-      PGPORT: ${{ job.services.postgres.ports[5432] }}
+      PGPORT: 5432
       PGPASSWORD: testpass
       POSTGRES_USER: health
       POSTGRES_DB: health
