@@ -1,11 +1,66 @@
-name: Deploy to GCP VM
+name: CI / Deploy
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: health
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: health
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      TEST_DB_URL: postgresql://health:testpass@localhost:5432/health
+      PGHOST: localhost
+      PGPORT: 5432
+      PGPASSWORD: testpass
+      POSTGRES_USER: health
+      POSTGRES_DB: health
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize database schema
+        run: bash scripts/init_postgres.sh
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            pytest \
+            psycopg2-binary \
+            pandas==2.2.2 \
+            numpy==1.26.4 \
+            scikit-learn==1.4.2 \
+            sqlalchemy==2.0.30 \
+            joblib==1.4.0
+
+      - name: Run tests
+        run: pytest tests/ -v
+
   deploy:
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
