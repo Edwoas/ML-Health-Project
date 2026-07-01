@@ -73,7 +73,7 @@ jobs:
           key: ${{ secrets.GCP_SSH_PRIVATE_KEY }}
           script: |
             set -e
-            cd ~/HealthProject
+            cd ~/ML-Health-Project
 
             echo "==> Pulling latest code"
             git pull origin main
