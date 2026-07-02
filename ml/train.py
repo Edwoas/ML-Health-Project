@@ -45,20 +45,33 @@ def _make_pipeline(estimator):
     return Pipeline([('scaler', StandardScaler()), ('model', estimator)])
 
 
-def train_models(db_url: str, model_dir: str = '/models') -> dict:
+def train_models(db_url: str, model_dir: str = '/models', up_to_date=None) -> dict:
+    """
+    Train on all scored rows up to and including up_to_date.
+    If up_to_date is None, uses all available scored rows.
+    """
     from ml.features import build_features
 
     engine = sqlalchemy.create_engine(db_url)
+    query = """
+        SELECT log_date, weather, temperature, num_meals, num_junkfood,
+               meal_size_lunch, meal_size_dinner, sugar,
+               stomach_issues, sleep_quality, exercise_gym, exercise_morning,
+               stress, social_activity, social_conflicts, tiredness_score
+        FROM health_logs
+        WHERE tiredness_score IS NOT NULL
+        {date_filter}
+        ORDER BY log_date
+    """
+    if up_to_date is not None:
+        sql = sqlalchemy.text(query.format(date_filter="AND log_date <= :up_to_date"))
+        params = {'up_to_date': str(up_to_date)}
+    else:
+        sql = sqlalchemy.text(query.format(date_filter=""))
+        params = {}
+
     with engine.connect() as conn:
-        result = conn.execute(sqlalchemy.text("""
-            SELECT log_date, weather, temperature, num_meals, num_junkfood,
-                   meal_size_lunch, meal_size_dinner, sugar,
-                   stomach_issues, sleep_quality, exercise_gym, exercise_morning,
-                   stress, social_activity, social_conflicts, tiredness_score
-            FROM health_logs
-            WHERE tiredness_score IS NOT NULL
-            ORDER BY log_date
-        """))
+        result = conn.execute(sql, params)
         df = pd.DataFrame(result.fetchall(), columns=result.keys())
 
     if len(df) < MIN_SAMPLES:

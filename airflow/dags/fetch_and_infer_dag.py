@@ -3,13 +3,17 @@ DAG: health_pipeline
 Schedule: midnight UTC every day
 
 Tasks:
-  1. fetch_and_upsert  — pull Google Sheet → upsert health_logs
-  2. check_new_data    — ShortCircuitOperator: passes only when new scored rows appeared
-  3. train_models      — retrain all four models
-  4. run_inference     — generate predictions for every date that lacks one
+  1. fetch_and_upsert   — pull Google Sheet → upsert health_logs
+  2. check_new_data     — ShortCircuitOperator: passes only when there are
+                          scored dates without a next-day prediction
+  3. train_and_infer    — for each pending scored date (chronologically):
+                            a. retrain on all scored rows up to that date
+                            b. predict the following day
+                          This ensures each prediction is made without the
+                          model having seen the date being predicted.
 
-If no new tiredness-scored rows were added since the last successful run,
-tasks 3 and 4 are skipped gracefully.
+If all next-day predictions are already up to date, tasks 2 and 3 are
+skipped gracefully.
 """
 
 import os
@@ -17,19 +21,13 @@ import sys
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.models import Variable
 from airflow.operators.python import PythonOperator, ShortCircuitOperator
 
 sys.path.insert(0, '/opt/airflow')
 
 DB_URL    = os.environ.get('APP_DB_URL')
 SHEET_ID  = os.environ.get('GOOGLE_SHEET_ID')
-SA_PATH   = os.environ.get('GOOGLE_SERVICE_ACCOUNT_PATH',
-                            '/opt/airflow/credentials/service-account.json')
 MODEL_DIR = os.environ.get('MODEL_DIR', '/models')
-
-# Airflow variable name that tracks how many scored rows we've seen
-_SCORED_COUNT_VAR = 'health_last_scored_count'
 
 COLUMN_ALIASES = {
     'date':                         'log_date',
@@ -64,6 +62,18 @@ DB_COLUMNS = {
     'stress', 'social_activity', 'social_conflicts', 'tiredness_score',
 }
 
+_PENDING_QUERY = """
+    SELECT h.log_date
+    FROM health_logs h
+    WHERE h.tiredness_score IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM predictions p
+        WHERE p.log_date = h.log_date + INTERVAL '1 day'
+    )
+    ORDER BY h.log_date ASC
+    LIMIT 60
+"""
+
 
 # ── Task 1 ────────────────────────────────────────────────────────────────────
 
@@ -78,8 +88,6 @@ def fetch_and_upsert(**context):
         'https://www.googleapis.com/auth/spreadsheets.readonly',
         'https://www.googleapis.com/auth/drive.readonly',
     ]
-    # Use Application Default Credentials — on the GCP VM this automatically
-    # picks up the service account attached to the instance, no key file needed.
     creds, _ = google.auth.default(scopes=scopes)
     gc = gspread.authorize(creds)
 
@@ -141,8 +149,9 @@ def fetch_and_upsert(**context):
 
 def check_new_data(**context) -> bool:
     """
-    Returns True (allow downstream tasks) only when the count of rows with a
-    tiredness_score has increased since the last successful pipeline run.
+    Returns True only when there are scored dates that don't yet have a
+    next-day prediction. No Airflow Variable needed — the DB is the source
+    of truth.
     """
     import sqlalchemy
     from sqlalchemy import text
@@ -150,56 +159,51 @@ def check_new_data(**context) -> bool:
     engine = sqlalchemy.create_engine(DB_URL)
     with engine.connect() as conn:
         result = conn.execute(text(
-            "SELECT COUNT(*) FROM health_logs WHERE tiredness_score IS NOT NULL"
+            f"SELECT COUNT(*) FROM ({_PENDING_QUERY}) pending"
         ))
-        current_count = result.scalar()
+        pending_count = result.scalar()
 
-    last_count = int(Variable.get(_SCORED_COUNT_VAR, default_var=0))
-
-    if current_count > last_count:
-        print(f"New scored rows detected: {last_count} → {current_count}. Proceeding.")
-        Variable.delete(_SCORED_COUNT_VAR)
-        Variable.set(_SCORED_COUNT_VAR, current_count)
+    if pending_count > 0:
+        print(f"{pending_count} date(s) need next-day predictions. Proceeding.")
         return True
 
-    print(f"No new scored rows ({current_count} unchanged). Skipping training & inference.")
+    print("All next-day predictions are up to date. Skipping.")
     return False
 
 
 # ── Task 3 ────────────────────────────────────────────────────────────────────
 
-def train(**context):
-    from ml.train import train_models
-    result = train_models(DB_URL, MODEL_DIR)
-    print(f"Training result: {result}")
+def train_and_infer(**context):
+    """
+    For each pending scored date (oldest first):
+      1. Retrain all models on scored rows up to and including that date.
+      2. Predict the following day using the freshly trained model.
 
-
-# ── Task 4 ────────────────────────────────────────────────────────────────────
-
-def run_inference(**context):
+    This guarantees every prediction is made blind — the model never sees
+    the date it is predicting.
+    """
     import sqlalchemy
     from sqlalchemy import text
+    from ml.train import train_models
     from ml.predict import predict_for_date
 
     engine = sqlalchemy.create_engine(DB_URL)
     with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT h.log_date
-            FROM health_logs h
-            LEFT JOIN predictions p ON h.log_date = p.log_date
-            WHERE p.log_date IS NULL
-            ORDER BY h.log_date DESC
-            LIMIT 60
-        """))
+        result = conn.execute(text(_PENDING_QUERY))
         pending = [row[0] for row in result]
 
     if not pending:
-        print("All logged dates already have predictions.")
+        print("No pending dates found.")
         return
 
-    print(f"Running inference for {len(pending)} date(s).")
-    for d in pending:
-        predict_for_date(d, DB_URL, MODEL_DIR)
+    print(f"Processing {len(pending)} pending date(s).")
+    for scored_date in pending:
+        next_day = scored_date + timedelta(days=1)
+        print(f"Training on data up to {scored_date}, predicting {next_day}.")
+        train_result = train_models(DB_URL, MODEL_DIR, up_to_date=scored_date)
+        print(f"  Train result: {train_result}")
+        predict_for_date(next_day, DB_URL, MODEL_DIR)
+        print(f"  Predicted {next_day}.")
 
 
 # ── DAG definition ─────────────────────────────────────────────────────────────
@@ -215,8 +219,8 @@ default_args = {
 with DAG(
     dag_id='health_pipeline',
     default_args=default_args,
-    description='Nightly health data pipeline: fetch → check → train → infer',
-    schedule_interval='0 0 * * *',   # midnight UTC
+    description='Nightly health data pipeline: fetch → check → train+infer',
+    schedule_interval='0 0 * * *',
     catchup=False,
     tags=['health'],
 ) as dag:
@@ -231,14 +235,9 @@ with DAG(
         python_callable=check_new_data,
     )
 
-    t_train = PythonOperator(
-        task_id='train_models',
-        python_callable=train,
+    t_train_and_infer = PythonOperator(
+        task_id='train_and_infer',
+        python_callable=train_and_infer,
     )
 
-    t_infer = PythonOperator(
-        task_id='run_inference',
-        python_callable=run_inference,
-    )
-
-    t_fetch >> t_check >> t_train >> t_infer
+    t_fetch >> t_check >> t_train_and_infer

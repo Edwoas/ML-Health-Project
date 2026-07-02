@@ -108,9 +108,10 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def get_inference_features(target_date, db_url: str) -> 'pd.DataFrame | None':
     """
-    Load the last LAG_WINDOW days up to target_date from the DB,
-    build the feature matrix, and return the single row for target_date.
-    Returns None if target_date has no entry in health_logs.
+    Load the last LAG_WINDOW scored days BEFORE target_date from the DB and
+    return a feature row representing the historical context for predicting
+    target_date. target_date itself is never loaded — its data is unseen.
+    Returns None if there are no scored rows before target_date.
     """
     import sqlalchemy
 
@@ -123,16 +124,16 @@ def get_inference_features(target_date, db_url: str) -> 'pd.DataFrame | None':
                 "stomach_issues, sleep_quality, exercise_gym, exercise_morning, "
                 "stress, social_activity, social_conflicts "
                 "FROM health_logs "
-                "WHERE log_date <= :target "
+                "WHERE log_date < :target "
                 f"ORDER BY log_date DESC LIMIT {LAG_WINDOW}"
             ),
             {'target': str(target_date)},
         )
         df = pd.DataFrame(result.fetchall(), columns=result.keys())
 
-    if df.empty or str(df['log_date'].max()) != str(target_date):
-        return None  # target date itself not in DB
+    if df.empty:
+        return None
 
     df = df.sort_values('log_date').reset_index(drop=True)
     features = build_features(df)
-    return features.iloc[[-1]]   # single-row DataFrame
+    return features.iloc[[-1]]

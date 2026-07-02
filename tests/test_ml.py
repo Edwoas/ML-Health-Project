@@ -7,6 +7,7 @@ import os
 import pytest
 import pandas as pd
 import numpy as np
+from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -57,7 +58,7 @@ def test_build_features_returns_43_columns():
     assert X.shape == (15, 43), f"Expected (15, 43), got {X.shape}"
 
 
-def test_build_features_all_float(conn=None):
+def test_build_features_all_float():
     from ml.features import build_features
     df = _minimal_df(5)
     X = build_features(df)
@@ -95,3 +96,35 @@ def test_day_of_week_column():
     X = build_features(df)
     # 2024-01-01 is a Monday (0)
     assert int(X["day_of_week"].iloc[0]) == 0
+
+
+def test_train_models_accepts_up_to_date_param():
+    """train_models signature must accept up_to_date without error."""
+    import inspect
+    from ml.train import train_models
+    params = inspect.signature(train_models).parameters
+    assert 'up_to_date' in params
+
+
+def test_get_inference_features_excludes_target_date():
+    """
+    get_inference_features loads rows BEFORE target_date only.
+    Verify by checking the SQL in features.py directly.
+    """
+    import ml.features as feat_module
+    import inspect
+    src = inspect.getsource(feat_module.get_inference_features)
+    assert "log_date < :target" in src, "Must use < not <= to exclude target date"
+    assert "log_date <= :target" not in src, "Must not include target date in feature window"
+
+
+def test_get_inference_features_does_not_require_target_in_db():
+    """
+    get_inference_features must not check whether target_date itself
+    exists in health_logs.
+    """
+    import ml.features as feat_module
+    import inspect
+    src = inspect.getsource(feat_module.get_inference_features)
+    assert "target date itself not in DB" not in src
+    assert "str(df['log_date'].max()) != str(target_date)" not in src

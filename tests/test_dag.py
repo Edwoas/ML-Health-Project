@@ -17,10 +17,16 @@ def test_dag_is_valid_python():
     ast.parse(_source())
 
 
-def test_dag_has_all_four_tasks():
+def test_dag_has_all_three_tasks():
     src = _source()
-    for task_id in ("fetch_and_upsert", "check_new_data", "train_models", "run_inference"):
+    for task_id in ("fetch_and_upsert", "check_new_data", "train_and_infer"):
         assert task_id in src, f"Task '{task_id}' not found in DAG"
+
+
+def test_dag_old_tasks_removed():
+    src = _source()
+    assert "task_id='train_models'" not in src
+    assert "task_id='run_inference'" not in src
 
 
 def test_dag_uses_short_circuit_operator():
@@ -38,7 +44,25 @@ def test_dag_schedule_is_midnight():
 
 
 def test_dag_task_chain():
-    """The four tasks must be chained in the correct order."""
     src = _source()
-    chain = "t_fetch >> t_check >> t_train >> t_infer"
+    chain = "t_fetch >> t_check >> t_train_and_infer"
     assert chain in src, f"Expected task chain '{chain}' not found"
+
+
+def test_dag_no_airflow_variable():
+    """check_new_data must not use Airflow Variables — DB is source of truth."""
+    src = _source()
+    assert "Variable.get" not in src
+    assert "Variable.set" not in src
+    assert "Variable.delete" not in src
+
+
+def test_dag_pending_query_excludes_target_date():
+    """Predictions must be for log_date + 1 day, never for the scored date itself."""
+    src = _source()
+    assert "log_date + INTERVAL '1 day'" in src
+
+
+def test_dag_uses_up_to_date():
+    """train_and_infer must pass up_to_date to train_models."""
+    assert "up_to_date=scored_date" in _source()
