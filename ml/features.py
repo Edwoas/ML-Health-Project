@@ -116,7 +116,7 @@ def get_inference_features(target_date, db_url: str) -> 'pd.DataFrame | None':
 
     engine = sqlalchemy.create_engine(db_url)
     with engine.connect() as conn:
-        df = pd.read_sql(
+        result = conn.execute(
             sqlalchemy.text(
                 "SELECT log_date, weather, temperature, num_meals, num_junkfood, "
                 "meal_size_lunch, meal_size_dinner, sugar, "
@@ -126,9 +126,9 @@ def get_inference_features(target_date, db_url: str) -> 'pd.DataFrame | None':
                 "WHERE log_date <= :target "
                 f"ORDER BY log_date DESC LIMIT {LAG_WINDOW}"
             ),
-            conn,
-            params={'target': str(target_date)},
+            {'target': str(target_date)},
         )
+        df = pd.DataFrame(result.fetchall(), columns=result.keys())
 
     if df.empty or str(df['log_date'].max()) != str(target_date):
         return None  # target date itself not in DB
