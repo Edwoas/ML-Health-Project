@@ -23,7 +23,7 @@ _KEYS = [
 @router.get('/', response_model=List[DashboardEntry])
 def get_dashboard(
     db: Session = Depends(get_db),
-    limit: int = Query(90, le=365),
+    limit: int = Query(500, le=3650),
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ):
