@@ -21,7 +21,7 @@ export default function Dashboard() {
   const [showHistory, setShowHistory] = useState(false)
 
   useEffect(() => {
-    fetchDashboard({ limit: 90 })
+    fetchDashboard()
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))

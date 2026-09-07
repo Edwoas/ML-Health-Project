@@ -1,6 +1,6 @@
 const BASE = '/api'
 
-export async function fetchDashboard({ limit = 90, startDate, endDate } = {}) {
+export async function fetchDashboard({ limit = 500, startDate, endDate } = {}) {
   const params = new URLSearchParams({ limit })
   if (startDate) params.set('start_date', startDate)
   if (endDate)   params.set('end_date', endDate)
