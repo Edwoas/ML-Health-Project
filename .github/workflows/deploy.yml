@@ -53,7 +53,8 @@ jobs:
             numpy==1.26.4 \
             scikit-learn==1.4.2 \
             sqlalchemy==2.0.30 \
-            joblib==1.4.0
+            joblib==1.4.0 \
+            mlflow-skinny==2.15.0
 
       - name: Run tests
         run: pytest tests/ -v
@@ -62,7 +63,7 @@ jobs:
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Deploy via SSH
