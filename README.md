@@ -1,3 +1,5 @@
+<img width="5463" height="3853" alt="Google Sheet to ML Model-2026-09-09-083124" src="https://github.com/user-attachments/assets/c2eeaa9e-5fb1-46f3-938c-1a35ce5ff120" />
+
 # Health ML Tracker
 
 A personal full-stack ML application that predicts daily tiredness from self-logged lifestyle metrics.
