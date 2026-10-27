@@ -6,8 +6,9 @@ For each day t the feature vector contains:
   - 10-day rolling mean of each value  (14 features)
   - 10-day rolling std  of each value  (14 features)
   - Day of week (0=Mon … 6=Sun)        (1 feature)
+  - Previous day's tiredness score     (1 feature)
 
-Total: 43 features per row.
+Total: 44 features per row.
 
 Both build_features() (for training, full DataFrame) and
 get_inference_features() (for a single target date, loads from DB)
@@ -77,8 +78,10 @@ def _prepare_raw(df: pd.DataFrame) -> pd.DataFrame:
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Build the full feature matrix for an entire DataFrame.
-    Input must contain all raw columns plus log_date.
-    Returns a DataFrame with 43 columns, same index as the sorted df.
+    Input must contain all raw columns plus log_date. If tiredness_score is
+    present it is used as a lag-1 feature (previous day's score); the first
+    row defaults to 5 (mid-scale) when no prior value exists.
+    Returns a DataFrame with 44 columns, same index as the sorted df.
     Caller should drop rows with NaN targets before fitting.
     """
     df = _prepare_raw(df)
@@ -103,6 +106,13 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # 3. Day of week (0 = Monday)
     result['day_of_week'] = pd.to_datetime(df['log_date']).dt.dayofweek.values
 
+    # 4. Previous day's tiredness score (lag-1 target)
+    if 'tiredness_score' in df.columns:
+        tiredness = pd.to_numeric(df['tiredness_score'], errors='coerce')
+    else:
+        tiredness = pd.Series(np.nan, index=df.index)
+    result['tiredness_lag1'] = tiredness.shift(1).fillna(5).values
+
     return pd.DataFrame(result).astype(float)
 
 
@@ -122,7 +132,7 @@ def get_inference_features(target_date, db_url: str) -> 'pd.DataFrame | None':
                 "SELECT log_date, weather, temperature, num_meals, num_junkfood, "
                 "meal_size_lunch, meal_size_dinner, sugar, "
                 "stomach_issues, sleep_quality, exercise_gym, exercise_morning, "
-                "stress, social_activity, social_conflicts "
+                "stress, social_activity, social_conflicts, tiredness_score "
                 "FROM health_logs "
                 "WHERE log_date < :target "
                 f"ORDER BY log_date DESC LIMIT {LAG_WINDOW}"

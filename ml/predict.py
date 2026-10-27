@@ -13,12 +13,31 @@ from sqlalchemy import text
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+MLFLOW_TRACKING_URI = os.environ.get('MLFLOW_TRACKING_URI', 'http://mlflow:5000')
+MLFLOW_EXPERIMENT   = 'health_tiredness_prediction'
+
 
 def _clip(v: float) -> float:
     return round(max(1.0, min(10.0, v)), 2)
 
 
-def predict_for_date(log_date: date, db_url: str, model_dir: str = '/models') -> dict | None:
+def _log_prediction_to_mlflow(log_date, preds: dict, mlflow_run_id=None):
+    """Log inference results to MLflow. Non-fatal if the server is unavailable."""
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+        tags = {'training_run_id': mlflow_run_id} if mlflow_run_id else {}
+        with mlflow.start_run(run_name=f"predict_{log_date}", tags=tags):
+            mlflow.log_param('target_date', str(log_date))
+            for name, val in preds.items():
+                mlflow.log_metric(f'pred_{name}', val)
+    except Exception as e:
+        print(f"MLflow prediction log failed (non-fatal): {e}")
+
+
+def predict_for_date(log_date: date, db_url: str, model_dir: str = '/models',
+                     mlflow_run_id: str = None) -> dict | None:
     from ml.features import get_inference_features
 
     models_path = os.path.join(model_dir, 'models.pkl')
@@ -96,6 +115,7 @@ def predict_for_date(log_date: date, db_url: str, model_dir: str = '/models') ->
         f"ET={preds.get('extra_trees'):.2f}  "
         f"Ensemble={preds['ensemble']:.2f}"
     )
+    _log_prediction_to_mlflow(log_date, preds, mlflow_run_id)
     return preds
 
 

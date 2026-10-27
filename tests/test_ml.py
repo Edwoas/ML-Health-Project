@@ -51,11 +51,11 @@ def test_predict_module_importable():
     assert callable(predict_for_date)
 
 
-def test_build_features_returns_43_columns():
+def test_build_features_returns_44_columns():
     from ml.features import build_features
     df = _minimal_df(15)
     X = build_features(df)
-    assert X.shape == (15, 43), f"Expected (15, 43), got {X.shape}"
+    assert X.shape == (15, 44), f"Expected (15, 44), got {X.shape}"
 
 
 def test_build_features_all_float():
@@ -77,7 +77,7 @@ def test_build_features_single_row():
     from ml.features import build_features
     df = _minimal_df(1)
     X = build_features(df)
-    assert X.shape == (1, 43)
+    assert X.shape == (1, 44)
     assert not X.isnull().any().any()
 
 
@@ -128,3 +128,39 @@ def test_get_inference_features_does_not_require_target_in_db():
     src = inspect.getsource(feat_module.get_inference_features)
     assert "target date itself not in DB" not in src
     assert "str(df['log_date'].max()) != str(target_date)" not in src
+
+
+def test_tiredness_lag1_column_present():
+    from ml.features import build_features
+    df = _minimal_df(5)
+    X = build_features(df)
+    assert 'tiredness_lag1' in X.columns, "tiredness_lag1 feature must be present"
+
+
+def test_tiredness_lag1_shifts_by_one_row():
+    """Row i's tiredness_lag1 must equal row i-1's tiredness_score."""
+    from ml.features import build_features
+    df = _minimal_df(5)
+    df['tiredness_score'] = [4, 6, 8, 5, 7]
+    X = build_features(df)
+    # Row 0: no prior value → defaults to 5
+    assert float(X['tiredness_lag1'].iloc[0]) == 5.0
+    # Rows 1-4: previous day's score
+    assert list(X['tiredness_lag1'].iloc[1:].astype(int)) == [4, 6, 8, 5]
+
+
+def test_tiredness_lag1_no_nans_without_tiredness_score():
+    """build_features must not produce NaN when tiredness_score column is absent."""
+    from ml.features import build_features
+    df = _minimal_df(5).drop(columns=['tiredness_score'])
+    X = build_features(df)
+    assert not X.isnull().any().any()
+    assert (X['tiredness_lag1'] == 5.0).all(), "Should default to 5 when tiredness_score absent"
+
+
+def test_get_inference_features_loads_tiredness_score():
+    """get_inference_features SQL must include tiredness_score for lag-1 feature."""
+    import ml.features as feat_module
+    import inspect
+    src = inspect.getsource(feat_module.get_inference_features)
+    assert "tiredness_score" in src, "Must load tiredness_score for lag-1 feature"

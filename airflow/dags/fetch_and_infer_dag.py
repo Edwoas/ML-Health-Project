@@ -202,7 +202,8 @@ def train_and_infer(**context):
         print(f"Training on data up to {scored_date}, predicting {next_day}.")
         train_result = train_models(DB_URL, MODEL_DIR, up_to_date=scored_date)
         print(f"  Train result: {train_result}")
-        predict_for_date(next_day, DB_URL, MODEL_DIR)
+        predict_for_date(next_day, DB_URL, MODEL_DIR,
+                         mlflow_run_id=train_result.get('mlflow_run_id'))
         print(f"  Predicted {next_day}.")
 
 

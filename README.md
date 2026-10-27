@@ -26,7 +26,7 @@ Each day's lifestyle data (meals, exercise, sleep, stress, etc.) is logged in a 
 ```
 airflow/dags/       — nightly pipeline (fetch → check → train+infer)
 ml/
-  features.py       — 43-column feature engineering (10-day rolling window)
+  features.py       — 44-column feature engineering (10-day rolling window + tiredness lag-1)
   train.py          — model training, saves models.pkl
   predict.py        — inference, writes to predictions table
 backend/app/        — FastAPI routes (dashboard, correlations, history)

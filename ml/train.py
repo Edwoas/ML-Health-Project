@@ -26,6 +26,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 MIN_SAMPLES = 10  # refuse to train below this
 
+MLFLOW_TRACKING_URI = os.environ.get('MLFLOW_TRACKING_URI', 'http://mlflow:5000')
+MLFLOW_EXPERIMENT   = 'health_tiredness_prediction'
+
 _MODEL_DEFINITIONS = {
     'random_forest': RandomForestRegressor(
         n_estimators=200, max_features='sqrt', random_state=42, n_jobs=-1
@@ -43,6 +46,24 @@ _MODEL_DEFINITIONS = {
 
 def _make_pipeline(estimator):
     return Pipeline([('scaler', StandardScaler()), ('model', estimator)])
+
+
+def _log_training_to_mlflow(up_to_date, n_samples, cv_maes: dict, version: str):
+    """Log a training run to MLflow. Non-fatal if the server is unavailable."""
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+        with mlflow.start_run(run_name=f"train_{up_to_date}") as run:
+            mlflow.log_param('up_to_date', str(up_to_date))
+            mlflow.log_param('n_samples', n_samples)
+            mlflow.log_param('model_version', version)
+            for model_name, mae in cv_maes.items():
+                mlflow.log_metric(f'{model_name}_cv_mae', mae)
+            return run.info.run_id
+    except Exception as e:
+        print(f"MLflow training log failed (non-fatal): {e}")
+        return None
 
 
 def train_models(db_url: str, model_dir: str = '/models', up_to_date=None) -> dict:
@@ -82,6 +103,7 @@ def train_models(db_url: str, model_dir: str = '/models', up_to_date=None) -> di
     y = df['tiredness_score'].astype(float).values
 
     trained = {}
+    cv_maes = {}
     for name, estimator in _MODEL_DEFINITIONS.items():
         pipeline = _make_pipeline(estimator)
 
@@ -90,7 +112,9 @@ def train_models(db_url: str, model_dir: str = '/models', up_to_date=None) -> di
             scores = cross_val_score(
                 pipeline, X, y, cv=cv_folds, scoring='neg_mean_absolute_error'
             )
-            print(f"[{name}] CV MAE: {(-scores.mean()):.3f} ± {scores.std():.3f}")
+            mae = float(-scores.mean())
+            cv_maes[name] = mae
+            print(f"[{name}] CV MAE: {mae:.3f} ± {scores.std():.3f}")
 
         pipeline.fit(X, y)
         trained[name] = pipeline
@@ -102,7 +126,15 @@ def train_models(db_url: str, model_dir: str = '/models', up_to_date=None) -> di
     joblib.dump(trained, os.path.join(model_dir, f'models_{version}.pkl'))
 
     print(f"All models saved. Version: {version}")
-    return {'status': 'success', 'version': version, 'n_samples': len(df)}
+
+    mlflow_run_id = _log_training_to_mlflow(up_to_date, len(df), cv_maes, version)
+
+    return {
+        'status': 'success',
+        'version': version,
+        'n_samples': len(df),
+        'mlflow_run_id': mlflow_run_id,
+    }
 
 
 if __name__ == '__main__':

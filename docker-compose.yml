@@ -20,6 +20,7 @@ x-airflow-common:
     GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
     GOOGLE_SERVICE_ACCOUNT_PATH: /opt/airflow/credentials/service-account.json
     MODEL_DIR: /models
+    MLFLOW_TRACKING_URI: http://mlflow:5000
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -103,6 +104,14 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  mlflow:
+    build: ./mlflow
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
@@ -117,3 +126,4 @@ services:
 
 volumes:
   postgres-data:
+  mlflow-data:
