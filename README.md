@@ -2,13 +2,15 @@
 
 # Health ML Tracker
 
-A personal full-stack ML application that predicts daily tiredness from self-logged lifestyle metrics.
+A personal full-stack ML application that predicts daily tiredness from logged lifestyle metrics.
 
 ## What it does
 
-Each day's lifestyle data (meals, exercise, sleep, stress, etc.) is logged in a Google Sheet. A nightly pipeline pulls that data, retrains four regression models, and predicts the next day's tiredness score. Predictions and actuals are displayed in a web dashboard.
+Each day's lifestyle data (meals, exercise, sleep, stress, etc.) is logged in a Google Sheet. A nightly pipeline pulls the data, retrains four regression models, and predicts the next day's tiredness score. Predictions and actuals are displayed in a web dashboard.
 
-**Prediction design**: models are trained on all data up to day D and predict day D+1 — the model never sees the day it is predicting. This is walk-forward validation by construction, not a retrospective split.
+<img width="1077" height="737" alt="Screenshot 2026-10-30 at 17 26 51" src="https://github.com/user-attachments/assets/59fc534a-4ef9-48e1-a878-05d28c8fca5e" />
+
+**Prediction design**: models are trained on all data up to day D and predict day D+1 — the model never sees the day it is predicting.
 
 ## Model performance
 
@@ -84,8 +86,7 @@ Each pipeline run logs to MLflow under the `health_tiredness_prediction` experim
 Access the MLflow UI via SSH tunnel:
 
 ```bash
-ssh -i ~/.ssh/health_ml_vm -L 15000:localhost:5000 user@<vm-ip> -N
-# then open http://localhost:15000
+ssh -i ~/.ssh/health_ml_vm -L <some port>:localhost:5000 user@<vm-ip> -N
 ```
 
 ## Running locally
