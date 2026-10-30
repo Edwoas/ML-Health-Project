@@ -24,9 +24,7 @@ Evaluated on all days where a next-day prediction was made and the actual score 
 | Extra Trees | 0.47 | |
 | **Ensemble (mean)** | **0.53** | average of the four models |
 
-MAE is on a 1–10 tiredness scale — a value of 1.0 means predictions are off by one point on average. Cross-validation R² for the best model: X.XX.
-
-Hyperparameters are tuned automatically via grid search (see [ml/tune.py](ml/tune.py)) whenever 7+ new labelled days are available, with the champion model retained only if it improves on the previous CV MAE.
+MAE is on a 1–10 scale — Extra Trees at 0.47 means predictions are off by less than half a point on average. Hyperparameters are tuned automatically via grid search (see [ml/tune.py](ml/tune.py)) whenever 7+ new labelled days are available, with the champion model retained only if it improves on the previous CV MAE.
 
 ## Stack
 
