@@ -1,5 +1,3 @@
-<img width="5587" height="3057" alt="Google Sheet to ML Model-2026-10-30-161559" src="https://github.com/user-attachments/assets/259e6124-0687-4e5e-8841-439c034f479e" />
-
 # Health ML Tracker
 
 A personal full-stack ML application that predicts daily tiredness from logged lifestyle metrics.
@@ -39,6 +37,8 @@ MAE is on a 1–10 scale — Extra Trees at 0.47 means predictions are off by le
 | Frontend | React + Recharts |
 | Infrastructure | GCP Compute Engine e2-small, Docker Compose |
 | CI/CD | GitHub Actions (test → deploy via SSH) |
+
+<img width="5587" height="3057" alt="Google Sheet to ML Model-2026-10-30-161559" src="https://github.com/user-attachments/assets/259e6124-0687-4e5e-8841-439c034f479e" />
 
 ## Project structure
 
