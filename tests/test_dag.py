@@ -17,9 +17,15 @@ def test_dag_is_valid_python():
     ast.parse(_source())
 
 
-def test_dag_has_all_three_tasks():
+def test_dag_has_original_tasks():
     src = _source()
     for task_id in ("fetch_and_upsert", "check_new_data", "train_and_infer"):
+        assert task_id in src, f"Task '{task_id}' not found in DAG"
+
+
+def test_dag_has_new_tasks():
+    src = _source()
+    for task_id in ("log_actuals", "should_tune", "tune_hyperparams"):
         assert task_id in src, f"Task '{task_id}' not found in DAG"
 
 
@@ -30,7 +36,8 @@ def test_dag_old_tasks_removed():
 
 
 def test_dag_uses_short_circuit_operator():
-    assert "ShortCircuitOperator" in _source()
+    src = _source()
+    assert src.count("ShortCircuitOperator") >= 2, "Expected at least two ShortCircuitOperators"
 
 
 def test_dag_uses_adc_not_key_file():
@@ -45,8 +52,8 @@ def test_dag_schedule_is_midnight():
 
 def test_dag_task_chain():
     src = _source()
-    chain = "t_fetch >> t_check >> t_train_and_infer"
-    assert chain in src, f"Expected task chain '{chain}' not found"
+    assert "t_fetch >> t_check >> t_train_and_infer >> t_should_tune >> t_tune" in src
+    assert "t_fetch >> t_log_actuals" in src
 
 
 def test_dag_no_airflow_variable():
@@ -66,3 +73,13 @@ def test_dag_pending_query_excludes_target_date():
 def test_dag_uses_up_to_date():
     """train_and_infer must pass up_to_date to train_models."""
     assert "up_to_date=scored_date" in _source()
+
+
+def test_dag_tune_reads_last_tuned_file():
+    """should_tune must gate on last_tuned.txt so grid search doesn't run every night."""
+    assert "last_tuned.txt" in _source()
+
+
+def test_dag_log_actuals_tracks_logged_dates():
+    """log_actuals must persist which dates have been logged to avoid duplicate MLflow runs."""
+    assert "actuals_logged.json" in _source()

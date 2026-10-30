@@ -4,16 +4,22 @@ Schedule: midnight UTC every day
 
 Tasks:
   1. fetch_and_upsert   — pull Google Sheet → upsert health_logs
-  2. check_new_data     — ShortCircuitOperator: passes only when there are
+  2. log_actuals        — for each date with both a prediction and an actual
+                          tiredness score, log prediction errors to MLflow
+                          (runs in parallel with check_new_data)
+  3. check_new_data     — ShortCircuitOperator: passes only when there are
                           scored dates without a next-day prediction
-  3. train_and_infer    — for each pending scored date (chronologically):
+  4. train_and_infer    — for each pending scored date (chronologically):
                             a. retrain on all scored rows up to that date
                             b. predict the following day
-                          This ensures each prediction is made without the
-                          model having seen the date being predicted.
+  5. should_tune        — ShortCircuitOperator: passes only when 7+ new
+                          labelled samples exist since the last tuning run
+  6. tune_hyperparams   — grid search over all models; writes best_params.json
+                          if any model improves on champion CV MAE
 
-If all next-day predictions are already up to date, tasks 2 and 3 are
-skipped gracefully.
+If all next-day predictions are already up to date, tasks 3–6 are skipped
+gracefully. If fewer than 7 new samples exist since last tuning, tasks 5–6
+are skipped.
 """
 
 import os
@@ -25,9 +31,11 @@ from airflow.operators.python import PythonOperator, ShortCircuitOperator
 
 sys.path.insert(0, '/opt/airflow')
 
-DB_URL    = os.environ.get('APP_DB_URL')
-SHEET_ID  = os.environ.get('GOOGLE_SHEET_ID')
-MODEL_DIR = os.environ.get('MODEL_DIR', '/models')
+DB_URL              = os.environ.get('APP_DB_URL')
+SHEET_ID            = os.environ.get('GOOGLE_SHEET_ID')
+MODEL_DIR           = os.environ.get('MODEL_DIR', '/models')
+MLFLOW_TRACKING_URI = os.environ.get('MLFLOW_TRACKING_URI', 'http://mlflow:5000')
+MLFLOW_EXPERIMENT   = 'health_tiredness_prediction'
 
 COLUMN_ALIASES = {
     'date':                         'log_date',
@@ -147,6 +155,83 @@ def fetch_and_upsert(**context):
 
 # ── Task 2 ────────────────────────────────────────────────────────────────────
 
+def log_actuals(**context):
+    """
+    For each date where both a prediction and an actual tiredness score exist,
+    log prediction errors to MLflow. Tracks logged dates in
+    MODEL_DIR/actuals_logged.json so entries are written only once.
+    """
+    import json
+    import sqlalchemy
+    from sqlalchemy import text
+
+    logged_path  = os.path.join(MODEL_DIR, 'actuals_logged.json')
+    already_logged = set()
+    if os.path.exists(logged_path):
+        with open(logged_path) as f:
+            already_logged = set(json.load(f))
+
+    engine = sqlalchemy.create_engine(DB_URL)
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT p.log_date,
+                   p.pred_random_forest, p.pred_gradient_boost,
+                   p.pred_ridge, p.pred_extra_trees, p.pred_ensemble,
+                   h.tiredness_score
+            FROM predictions p
+            JOIN health_logs h ON h.log_date = p.log_date
+            WHERE h.tiredness_score IS NOT NULL
+            ORDER BY p.log_date
+        """))
+        rows = result.fetchall()
+
+    new_logged  = set(already_logged)
+    new_entries = 0
+
+    try:
+        import mlflow
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        mlflow.set_experiment(MLFLOW_EXPERIMENT)
+
+        for row in rows:
+            log_date_str = str(row[0])
+            if log_date_str in already_logged:
+                continue
+
+            actual      = float(row[6])
+            model_preds = {
+                'random_forest':  row[1],
+                'gradient_boost': row[2],
+                'ridge':          row[3],
+                'extra_trees':    row[4],
+                'ensemble':       row[5],
+            }
+
+            with mlflow.start_run(run_name=f"actual_{log_date_str}"):
+                mlflow.log_param('log_date', log_date_str)
+                mlflow.log_metric('actual_tiredness', actual)
+                for name, pred in model_preds.items():
+                    if pred is not None:
+                        pred = float(pred)
+                        mlflow.log_metric(f'pred_{name}',         pred)
+                        mlflow.log_metric(f'abs_error_{name}',    abs(actual - pred))
+                        mlflow.log_metric(f'signed_error_{name}', actual - pred)
+
+            new_logged.add(log_date_str)
+            new_entries += 1
+
+    except Exception as e:
+        print(f"MLflow actuals log failed (non-fatal): {e}")
+
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    with open(logged_path, 'w') as f:
+        json.dump(sorted(new_logged), f)
+
+    print(f"Logged {new_entries} new actuals to MLflow.")
+
+
+# ── Task 3 ────────────────────────────────────────────────────────────────────
+
 def check_new_data(**context) -> bool:
     """
     Returns True only when there are scored dates that don't yet have a
@@ -171,7 +256,7 @@ def check_new_data(**context) -> bool:
     return False
 
 
-# ── Task 3 ────────────────────────────────────────────────────────────────────
+# ── Task 4 ────────────────────────────────────────────────────────────────────
 
 def train_and_infer(**context):
     """
@@ -207,6 +292,50 @@ def train_and_infer(**context):
         print(f"  Predicted {next_day}.")
 
 
+# ── Task 5 ────────────────────────────────────────────────────────────────────
+
+def should_tune(**context) -> bool:
+    """
+    Returns True only when 7+ new labelled samples exist since the last
+    grid search run (tracked via MODEL_DIR/last_tuned.txt).
+    """
+    import sqlalchemy
+    from sqlalchemy import text
+
+    last_tuned_path = os.path.join(MODEL_DIR, 'last_tuned.txt')
+    last_tuned = None
+    if os.path.exists(last_tuned_path):
+        with open(last_tuned_path) as f:
+            last_tuned = f.read().strip()
+
+    engine = sqlalchemy.create_engine(DB_URL)
+    with engine.connect() as conn:
+        if last_tuned:
+            result = conn.execute(text("""
+                SELECT COUNT(*) FROM health_logs
+                WHERE tiredness_score IS NOT NULL AND log_date > :last_tuned
+            """), {'last_tuned': last_tuned})
+        else:
+            result = conn.execute(text(
+                "SELECT COUNT(*) FROM health_logs WHERE tiredness_score IS NOT NULL"
+            ))
+        count = result.scalar()
+
+    if count >= 7:
+        print(f"{count} new sample(s) since last tuning. Proceeding with grid search.")
+        return True
+    print(f"Only {count} new sample(s) since last tuning (need 7). Skipping grid search.")
+    return False
+
+
+# ── Task 6 ────────────────────────────────────────────────────────────────────
+
+def tune_hyperparams(**context):
+    from ml.tune import run_grid_search
+    result = run_grid_search(DB_URL, MODEL_DIR)
+    print(f"Grid search complete: {result}")
+
+
 # ── DAG definition ─────────────────────────────────────────────────────────────
 
 default_args = {
@@ -220,7 +349,7 @@ default_args = {
 with DAG(
     dag_id='health_pipeline',
     default_args=default_args,
-    description='Nightly health data pipeline: fetch → check → train+infer',
+    description='Nightly health data pipeline: fetch → check → train+infer → tune',
     schedule_interval='0 0 * * *',
     catchup=False,
     tags=['health'],
@@ -229,6 +358,11 @@ with DAG(
     t_fetch = PythonOperator(
         task_id='fetch_and_upsert',
         python_callable=fetch_and_upsert,
+    )
+
+    t_log_actuals = PythonOperator(
+        task_id='log_actuals',
+        python_callable=log_actuals,
     )
 
     t_check = ShortCircuitOperator(
@@ -241,4 +375,15 @@ with DAG(
         python_callable=train_and_infer,
     )
 
-    t_fetch >> t_check >> t_train_and_infer
+    t_should_tune = ShortCircuitOperator(
+        task_id='should_tune',
+        python_callable=should_tune,
+    )
+
+    t_tune = PythonOperator(
+        task_id='tune_hyperparams',
+        python_callable=tune_hyperparams,
+    )
+
+    t_fetch >> t_log_actuals
+    t_fetch >> t_check >> t_train_and_infer >> t_should_tune >> t_tune

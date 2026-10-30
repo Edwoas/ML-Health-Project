@@ -4,6 +4,7 @@ Tests for ml/ modules that do not require a database connection.
 
 import sys
 import os
+import json
 import pytest
 import pandas as pd
 import numpy as np
@@ -35,20 +36,12 @@ def _minimal_df(n=15):
     })
 
 
+# ── features.py tests ─────────────────────────────────────────────────────────
+
 def test_feature_modules_importable():
     from ml.features import build_features, get_inference_features
     assert callable(build_features)
     assert callable(get_inference_features)
-
-
-def test_train_module_importable():
-    from ml.train import train_models
-    assert callable(train_models)
-
-
-def test_predict_module_importable():
-    from ml.predict import predict_for_date
-    assert callable(predict_for_date)
 
 
 def test_build_features_returns_44_columns():
@@ -98,14 +91,6 @@ def test_day_of_week_column():
     assert int(X["day_of_week"].iloc[0]) == 0
 
 
-def test_train_models_accepts_up_to_date_param():
-    """train_models signature must accept up_to_date without error."""
-    import inspect
-    from ml.train import train_models
-    params = inspect.signature(train_models).parameters
-    assert 'up_to_date' in params
-
-
 def test_get_inference_features_excludes_target_date():
     """
     get_inference_features loads rows BEFORE target_date only.
@@ -119,10 +104,6 @@ def test_get_inference_features_excludes_target_date():
 
 
 def test_get_inference_features_does_not_require_target_in_db():
-    """
-    get_inference_features must not check whether target_date itself
-    exists in health_logs.
-    """
     import ml.features as feat_module
     import inspect
     src = inspect.getsource(feat_module.get_inference_features)
@@ -143,9 +124,7 @@ def test_tiredness_lag1_shifts_by_one_row():
     df = _minimal_df(5)
     df['tiredness_score'] = [4, 6, 8, 5, 7]
     X = build_features(df)
-    # Row 0: no prior value → defaults to 5
     assert float(X['tiredness_lag1'].iloc[0]) == 5.0
-    # Rows 1-4: previous day's score
     assert list(X['tiredness_lag1'].iloc[1:].astype(int)) == [4, 6, 8, 5]
 
 
@@ -164,3 +143,106 @@ def test_get_inference_features_loads_tiredness_score():
     import inspect
     src = inspect.getsource(feat_module.get_inference_features)
     assert "tiredness_score" in src, "Must load tiredness_score for lag-1 feature"
+
+
+# ── train.py tests ────────────────────────────────────────────────────────────
+
+def test_train_module_importable():
+    from ml.train import train_models
+    assert callable(train_models)
+
+
+def test_train_models_accepts_up_to_date_param():
+    """train_models signature must accept up_to_date without error."""
+    import inspect
+    from ml.train import train_models
+    params = inspect.signature(train_models).parameters
+    assert 'up_to_date' in params
+
+
+def test_build_models_from_params_returns_four_models(tmp_path):
+    from ml.train import _build_models_from_params
+    models = _build_models_from_params(str(tmp_path))
+    assert set(models.keys()) == {'random_forest', 'gradient_boost', 'ridge', 'extra_trees'}
+
+
+def test_build_models_from_params_uses_defaults_without_file(tmp_path):
+    from ml.train import _build_models_from_params, _DEFAULT_PARAMS
+    models = _build_models_from_params(str(tmp_path))
+    assert models['random_forest'].n_estimators == _DEFAULT_PARAMS['random_forest']['n_estimators']
+    assert models['ridge'].alpha == _DEFAULT_PARAMS['ridge']['alpha']
+
+
+def test_build_models_from_params_merges_tuned_params(tmp_path):
+    from ml.train import _build_models_from_params
+    tuned = {'random_forest': {'n_estimators': 50}}
+    (tmp_path / 'best_params.json').write_text(json.dumps(tuned))
+    models = _build_models_from_params(str(tmp_path))
+    assert models['random_forest'].n_estimators == 50
+
+
+def test_build_models_from_params_does_not_affect_other_models(tmp_path):
+    """Tuning one model must not change another model's params."""
+    from ml.train import _build_models_from_params, _DEFAULT_PARAMS
+    tuned = {'random_forest': {'n_estimators': 50}}
+    (tmp_path / 'best_params.json').write_text(json.dumps(tuned))
+    models = _build_models_from_params(str(tmp_path))
+    assert models['extra_trees'].n_estimators == _DEFAULT_PARAMS['extra_trees']['n_estimators']
+
+
+# ── predict.py tests ──────────────────────────────────────────────────────────
+
+def test_predict_module_importable():
+    from ml.predict import predict_for_date
+    assert callable(predict_for_date)
+
+
+# ── tune.py tests ─────────────────────────────────────────────────────────────
+
+def test_tune_module_importable():
+    from ml.tune import run_grid_search
+    assert callable(run_grid_search)
+
+
+def test_tune_load_best_scores_returns_empty_when_missing(tmp_path):
+    from ml.tune import load_best_scores
+    assert load_best_scores(str(tmp_path)) == {}
+
+
+def test_tune_best_scores_roundtrip(tmp_path):
+    from ml.tune import save_best_scores, load_best_scores
+    scores = {'random_forest': 0.85, 'gradient_boost': 0.90}
+    save_best_scores(str(tmp_path), scores)
+    loaded = load_best_scores(str(tmp_path))
+    assert loaded == scores
+
+
+def test_tune_load_best_params_returns_empty_when_missing(tmp_path):
+    from ml.tune import load_best_params
+    assert load_best_params(str(tmp_path)) == {}
+
+
+def test_tune_best_params_roundtrip(tmp_path):
+    from ml.tune import save_best_params, load_best_params
+    params = {'random_forest': {'n_estimators': 100, 'max_depth': 10}}
+    save_best_params(str(tmp_path), params)
+    loaded = load_best_params(str(tmp_path))
+    assert loaded == params
+
+
+def test_tune_best_params_null_max_depth_roundtrip(tmp_path):
+    """max_depth=None must survive JSON serialisation (stored as null)."""
+    from ml.tune import save_best_params, load_best_params
+    params = {'random_forest': {'n_estimators': 100, 'max_depth': None}}
+    save_best_params(str(tmp_path), params)
+    loaded = load_best_params(str(tmp_path))
+    assert loaded['random_forest']['max_depth'] is None
+
+
+def test_tune_saved_params_apply_to_train(tmp_path):
+    """Params written by tune must be picked up by _build_models_from_params."""
+    from ml.tune import save_best_params
+    from ml.train import _build_models_from_params
+    save_best_params(str(tmp_path), {'ridge': {'alpha': 99.0}})
+    models = _build_models_from_params(str(tmp_path))
+    assert models['ridge'].alpha == 99.0
