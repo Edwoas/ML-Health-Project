@@ -161,6 +161,13 @@ def train_models(db_url: str, model_dir: str = '/models', up_to_date=None) -> di
     joblib.dump(trained, os.path.join(model_dir, f'models_{version}.pkl'))
     print(f"All models saved. Version: {version}")
 
+    archives = sorted(
+        f for f in os.listdir(model_dir)
+        if f.startswith('models_') and f.endswith('.pkl') and f != 'models.pkl'
+    )
+    for old in archives[:-5]:
+        os.remove(os.path.join(model_dir, old))
+
     min_date = df['log_date'].min()
     max_date = df['log_date'].max()
     try:
