@@ -6,7 +6,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <h1>Health ML Tracker</h1>
-        <p>Daily tiredness &amp; dizziness prediction from your health metrics</p>
+        <p>Daily tiredness &amp; dizziness prediction from health metrics</p>
       </header>
 
       <main className="app-main">
